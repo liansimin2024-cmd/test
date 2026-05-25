@@ -1,10 +1,3 @@
-明白了！你的意思是不再生成 `CNAME` 指向 `www.aipulse.run`，并且将原本用于输出 `index.html` 的整套 Python 代码进行全量更新，换成一套全新设计的、更现代化的页面。
-
-这套新设计采用了响应式双栏看板（Dashboard）布局，电脑端左边是“今日AI重点”，右边是“今日浏览器/输入法重点”，手机端则自动自适应垂直平铺，整体视觉更具科技感和专业内参的调性。
-
-以下是为你**同步替换并精简修改后**的完整 Python 脚本。我直接去掉了 `MY_DOMAIN` 相关的变量和生成 `CNAME` 的逻辑，你可以直接复制并完全覆盖你现有的 Python 文件：
-
-```python
 import pandas as pd
 from jinja2 import Template
 import json
@@ -15,7 +8,7 @@ import datetime
 # ==========================================
 # 1. 基础配置与排序权重定义
 # ==========================================
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1xPMH9Iv7EZpKAPyBjZDdUxny3R4Tb39lI43NYX3B0po/edit?gid=0#gid=0"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1CgheqoqcKn-klAJCS8fWRdyP1ybBlG8ReqPLsqkFpl8/export?format=csv&gid=0"
 
 CORE_COMPANIES = ['OpenAI', 'Google', 'Anthropic', 'Meta', '字节跳动', '阿里巴巴', '腾讯', '百度']
 SECONDARY_COMPANIES = ['Kimi', 'MiniMax', '智谱', 'xAI', '可灵', 'DeepSeek', 'Apple', '美团']
@@ -624,5 +617,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-```
