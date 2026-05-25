@@ -8,7 +8,6 @@ import datetime
 # ==========================================
 # 1. 基础配置与排序权重定义
 # ==========================================
-# 🔍 已经同步更新为你指定的最新 Google Doc 数据源
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1xPMH9Iv7EZpKAPyBjZDdUxny3R4Tb39lI43NYX3B0po/export?format=csv&gid=0"
 
 CORE_COMPANIES = ['OpenAI', 'Google', 'Anthropic', 'Meta', '字节跳动', '阿里巴巴', '腾讯', '百度']
@@ -54,10 +53,15 @@ def main():
 
     df.columns = [c.strip() for c in df.columns]
     
-    # 清洗日期列，去除首尾空格，确保完全基于表格数据
+    # 清洗关键列
     df['日期'] = df['日期'].astype(str).str.strip()
-    # 过滤掉空行或无效日期的行
     df = df[df['日期'] != ""]
+    
+    # 🔍 (1) 清洗新增的“分类”列，去除空格，默认为空字符串
+    if '分类' in df.columns:
+        df['分类'] = df['分类'].astype(str).str.strip()
+    else:
+        df['分类'] = ""
     
     name_map = {'字节': '字节跳动', '阿里': '阿里巴巴', 'Baidu': '百度', 'minimax': 'MiniMax', '智谱AI': '智谱', 'OpenAI ': 'OpenAI'}
     df['公司'] = df['公司'].replace(name_map)
@@ -85,7 +89,6 @@ def main():
 
     df_exploded = df.explode('公司_list')
     
-    # 🔍 严格提取当前 Google 表格中真实存在的去重日期列表，并按时间倒序排列
     all_dates = [str(d) for d in df['日期'].dropna().unique() if str(d).strip() != ""]
     all_dates.sort(key=parse_date_for_sort, reverse=True)
 
@@ -103,12 +106,11 @@ def main():
             headline_df['t_rank'] = headline_df['话题_list'].apply(get_topic_rank)
             sorted_headlines = headline_df.sort_values(by=['是否头条', 'c_rank', 't_rank']).to_dict('records')
             
-            # 分流逻辑
+            # 🔍 基于新增的“分类”列进行看板分流
             ai_hl = []
             browser_hl = []
             for item in sorted_headlines:
-                is_browser_or_input = any(t for t in item['话题_list'] if '浏览器' in t or '输入法' in t)
-                if is_browser_or_input:
+                if item['分类'] in ['浏览器', '输入法']:
                     browser_hl.append(item)
                 else:
                     ai_hl.append(item)
@@ -135,7 +137,7 @@ def main():
             return data_df.sort_values(by=['co_group_rank', 'item_internal_rank']).to_dict('records')
 
         for company in CORE_COMPANIES:
-            comp_df = day_df_exp[day_df_exp['box' if 'box' in day_df_exp.columns else '公司_list'] == company].copy()
+            comp_df = day_df_exp[day_df_exp['公司_list'] == company].copy()
             if not comp_df.empty: news_data_map[date][company] = sort_section_data(comp_df)
         sec_df = day_df_exp[day_df_exp['公司_list'].isin(SECONDARY_COMPANIES)].copy()
         if not sec_df.empty: news_data_map[date][SECONDARY_TITLE] = sort_section_data(sec_df)
@@ -145,7 +147,7 @@ def main():
     final_json_str = json.dumps(df.to_dict('records'), ensure_ascii=False)
 
     # ==========================================
-    # 4. 样式全面重构后的 HTML 模板（上下结构看板）
+    # 4. 前端 HTML 模板（同步更新历史检索筛选）
     # ==========================================
     template_str = """
     <!DOCTYPE html>
@@ -263,7 +265,6 @@ def main():
             .tab-content { display: none; }
             .tab-content.active { display: block; }
 
-            /* 🔍 核心修改：双焦点看板全面改为纵向上下堆叠结构 */
             .focus-stack {
                 display: flex;
                 flex-direction: column;
@@ -344,17 +345,17 @@ def main():
             .news-row-body { display: none; padding-top: 10px; font-size: 12.5px; color: var(--text-sub); border-top: 1px dashed var(--border); margin-top: 8px; text-align: justify; }
             .news-row.open .news-row-body { display: block; }
 
+            /* 历史检索网格布局 */
             .filter-grid {
                 background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md);
                 padding: 16px; margin-bottom: 20px; display: grid; grid-template-columns: 1fr; gap: 10px;
             }
             @media(min-width: 640px) {
                 .filter-grid { grid-template-columns: repeat(3, 1fr); }
-                .filter-full { grid-column: span 3; }
             }
             .filter-grid select { width: 100%; box-sizing: border-box; padding: 8px 12px; }
             .btn-action {
-                background: var(--primary); color: white; border: none; padding: 10px;
+                grid-column: 1 / -1; background: var(--primary); color: white; border: none; padding: 12px;
                 border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; font-size: 13px; transition: opacity 0.2s;
             }
             .btn-action:hover { opacity: 0.9; }
@@ -444,6 +445,7 @@ def main():
                                     <div class="tag-box">
                                         {% for tag in it['话题_list'] %}<span class="badge badge-gray">{{tag}}</span>{% endfor %}
                                         {% if co == SECONDARY_TITLE or co == '行业新闻' %}<span class="badge badge-gray" style="background:#fef3c7; color:#d97706">{{it['公司']}}</span>{% endif %}
+                                        <span class="badge {% if it['分类'] in ['浏览器','输入法'] %}badge-accent{% else %}badge-primary{% endif %}">{{it['分类'] if it['分类'] else 'AI'}}</span>
                                     </div>
                                     <div class="news-row-title">{{it['标题']}}</div>
                                 </div>
@@ -472,6 +474,13 @@ def main():
                 <select id="f-day"><option value="all">具体日期</option></select>
                 <select id="f-co"><option value="all">所有公司</option>{% for c in all_companies_clean %}<option value="{{c}}">{{c}}</option>{% endfor %}</select>
                 <select id="f-topic"><option value="all">所有话题</option>{% for t in all_topics %}<option value="{{t}}">{{t}}</option>{% endfor %}</select>
+                
+                <select id="f-cate">
+                    <option value="all">所有分类(AI 与 浏览器/输入法)</option>
+                    <option value="AI">AI动态</option>
+                    <option value="BrowserInput">浏览器/输入法</option>
+                </select>
+                
                 <button onclick="doSearch()" class="btn-action">立即检索内容</button>
             </div>
             <div id="results"></div>
@@ -565,15 +574,29 @@ def main():
             const day = document.getElementById('f-day').value;
             const company = document.getElementById('f-co').value;
             const topic = document.getElementById('f-topic').value;
+            const cate = document.getElementById('f-cate').value; // 🔍 检索新分类标签
+            
             const filtered = rawData.filter(it => {
                 let dateMatch = true;
                 if (day !== 'all') { dateMatch = it.日期 === day; }
                 else if (month !== 'all') { dateMatch = (it.year == year && it.month == month); }
                 else if (year !== 'all') { dateMatch = it.year == year; }
+                
                 const coMatch = (company === 'all' || it.公司.includes(company));
                 const topicMatch = (topic === 'all' || it.话题_list.includes(topic));
-                return dateMatch && coMatch && topicMatch;
+                
+                // 🔍 分类级联检索过滤核心逻辑
+                let cateMatch = true;
+                const itemCate = (it.分类 || '').trim();
+                if (cate === 'AI') {
+                    cateMatch = (itemCate === 'AI' || itemCate === '');
+                } else if (cate === 'BrowserInput') {
+                    cateMatch = (itemCate === '浏览器' || itemCate === '输入法');
+                }
+                
+                return dateMatch && coMatch && topicMatch && cateMatch;
             });
+            
             const resDiv = document.getElementById('results');
             resDiv.innerHTML = filtered.length ? '' : '<p style="text-align:center; padding:32px; font-size:12px; color:#94a3b8;">无匹配动态</p>';
             
@@ -586,7 +609,11 @@ def main():
                     item.onclick = () => item.classList.toggle('open');
                     const showD = it.日期.includes('至') ? it.日期.split('至')[1].trim() : it.日期.trim();
                     let tagsHtml = it.话题_list.map(tag => `<span class="badge badge-gray">${tag}</span>`).join('');
-                    item.innerHTML = `<div class="news-row-header"><div><div class="tag-box">${tagsHtml}<span class="badge badge-gray" style="background:#e2e8f0">${showD}</span><span class="badge badge-gray" style="background:#eff6ff; color:#2563eb">${it.公司}</span></div><div class="news-row-title">${it.标题}</div></div><div class="toggle-icon">＋</div></div><div class="news-row-body">${it.核心内容}<div class="meta-row" style="margin-top:10px;"><span>来源: ${it.来源}</span><a href="${it.链接}" class="link-text" target="_blank" onclick="event.stopPropagation();">阅读原文 →</a></div></div>`;
+                    
+                    const displayCate = (it.分类 === '浏览器' || it.分类 === '输入法') ? '浏览器/输入法' : 'AI';
+                    const cateColor = displayCate === 'AI' ? 'background:#eff6ff; color:#2563eb' : 'background:#f0fdfa; color:#0d9488';
+                    
+                    item.innerHTML = `<div class="news-row-header"><div><div class="tag-box">${tagsHtml}<span class="badge badge-gray" style="background:#e2e8f0">${showD}</span><span class="badge badge-gray" style="background:#f1f5f9; color:#475569">${it.公司}</span><span class="badge" style="${cateColor}">${displayCate}</span></div><div class="news-row-title">${it.标题}</div></div><div class="toggle-icon">＋</div></div><div class="news-row-body">${it.核心内容}<div class="meta-row" style="margin-top:10px;"><span>来源: ${it.来源}</span><a href="${it.链接}" class="link-text" target="_blank" onclick="event.stopPropagation();">阅读原文 →</a></div></div>`;
                     listDiv.appendChild(item);
                 });
                 resDiv.appendChild(listDiv);
@@ -610,7 +637,7 @@ def main():
     )
     
     with open("index.html", "w", encoding="utf-8") as f: f.write(html)
-    print("✨ index.html 重新编译编译成功，已严格过滤并采用上下排列结构！")
+    print("✨ index.html 基于新‘分类’列数据及检索模块重新编译成功！")
 
 if __name__ == "__main__":
     main()
