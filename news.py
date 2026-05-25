@@ -25,7 +25,6 @@ OTHER_PRIORITY = [
     'Sanctuary AI', '1X Technologies', 'Agility Robotics', '小红书', '森森'
 ]
 
-# --- 辅助函数 ---
 def parse_date_for_sort(date_str):
     d_part = date_str.split('至')[1].strip() if '至' in date_str else date_str.strip()
     try:
@@ -53,11 +52,10 @@ def main():
 
     df.columns = [c.strip() for c in df.columns]
     
-    # 清洗关键列
     df['日期'] = df['日期'].astype(str).str.strip()
     df = df[df['日期'] != ""]
     
-    # 🔍 (1) 清洗新增的“分类”列，去除空格，默认为空字符串
+    # 清洗关键“分类”列
     if '分类' in df.columns:
         df['分类'] = df['分类'].astype(str).str.strip()
     else:
@@ -68,11 +66,9 @@ def main():
     df['是否头条'] = pd.to_numeric(df['是否头条'], errors='coerce').fillna(0).astype(int)
     df = df.fillna("")
     
-    # 话题与公司处理
     df['话题_list'] = df['话题'].apply(lambda x: [i.strip() for i in str(x).replace(' ', '').split('、')] if x else [])
     df['公司_list'] = df['公司'].apply(lambda x: [i.strip() for i in str(x).split('、')] if x else [])
     
-    # 检索用列表
     all_individual_topics = set()
     for t_list in df['话题_list']: all_individual_topics.update(t_list)
     all_unique_topics = sorted(list(all_individual_topics))
@@ -81,7 +77,6 @@ def main():
     for c_list in df['公司_list']: all_individual_companies.update(c_list)
     all_unique_companies_clean = sorted(list(all_individual_companies), key=lambda x: x.encode('gbk') if isinstance(x, str) else x)
 
-    # 提取级联用年月日
     def get_ymd(date_str):
         dt = parse_date_for_sort(date_str)
         return dt.year, dt.month
@@ -106,7 +101,6 @@ def main():
             headline_df['t_rank'] = headline_df['话题_list'].apply(get_topic_rank)
             sorted_headlines = headline_df.sort_values(by=['是否头条', 'c_rank', 't_rank']).to_dict('records')
             
-            # 🔍 基于新增的“分类”列进行看板分流
             ai_hl = []
             browser_hl = []
             for item in sorted_headlines:
@@ -137,7 +131,7 @@ def main():
             return data_df.sort_values(by=['co_group_rank', 'item_internal_rank']).to_dict('records')
 
         for company in CORE_COMPANIES:
-            comp_df = day_df_exp[day_df_exp['公司_list'] == company].copy()
+            comp_df = day_df_exp[day_df_exp['FF_list' if 'FF_list' in day_df_exp.columns else '公司_list'] == company].copy()
             if not comp_df.empty: news_data_map[date][company] = sort_section_data(comp_df)
         sec_df = day_df_exp[day_df_exp['公司_list'].isin(SECONDARY_COMPANIES)].copy()
         if not sec_df.empty: news_data_map[date][SECONDARY_TITLE] = sort_section_data(sec_df)
@@ -147,484 +141,15 @@ def main():
     final_json_str = json.dumps(df.to_dict('records'), ensure_ascii=False)
 
     # ==========================================
-    # 4. 前端 HTML 模板（同步更新历史检索筛选）
+    # 4. 读取独立的 HTML 模板文件进行编译渲染
     # ==========================================
-    template_str = """
-    <!DOCTYPE html>
-    <html lang="zh-CN">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-        <title>全球 AI 核心动态内参</title>
-        <meta name="description" content="AI Pulse 深度内参：每日追踪全球顶级 AI 大厂、浏览器与输入法核心动态。">
-        <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-        <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@700;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-        <style>
-            :root {
-                --primary: #2563eb;
-                --primary-light: #eff6ff;
-                --accent: #0d9488;
-                --accent-light: #f0fdfa;
-                --text-main: #0f172a;
-                --text-sub: #334155;
-                --text-mute: #64748b;
-                --bg-main: #f8fafc;
-                --bg-card: #ffffff;
-                --border: #e2e8f0;
-                --radius-sm: 6px;
-                --radius-md: 12px;
-                --shadow-sm: 0 1px 3px 0 rgba(0,0,0,0.05);
-                --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03);
-            }
-
-            body {
-                font-family: 'Plus Jakarta Sans', -apple-system, "PingFang SC", sans-serif;
-                background: var(--bg-main);
-                color: var(--text-main);
-                margin: 0;
-                padding: 0;
-                line-height: 1.6;
-                -webkit-font-smoothing: antialiased;
-            }
-
-            .container {
-                max-width: 1000px;
-                margin: 0 auto;
-                padding: 24px 16px;
-            }
-
-            header {
-                text-align: center;
-                margin-bottom: 32px;
-                padding: 12px 0;
-            }
-
-            header h1 {
-                font-family: 'Noto Serif SC', serif;
-                font-weight: 900;
-                font-size: 26px;
-                color: var(--text-main);
-                margin: 0 0 6px 0;
-                letter-spacing: 1px;
-            }
-
-            .navbar {
-                display: flex;
-                flex-direction: column;
-                gap: 12px;
-                background: rgba(255, 255, 255, 0.85);
-                backdrop-filter: blur(12px);
-                -webkit-backdrop-filter: blur(12px);
-                border: 1px solid var(--border);
-                padding: 12px 16px;
-                border-radius: var(--radius-md);
-                margin-bottom: 24px;
-                box-shadow: var(--shadow-sm);
-                position: sticky;
-                top: 12px;
-                z-index: 1000;
-            }
-
-            @media(min-width: 640px) {
-                .navbar { flex-direction: row; justify-content: space-between; align-items: center; }
-            }
-
-            .tabs-nav { display: flex; gap: 6px; }
-            
-            .tab-btn {
-                padding: 6px 14px;
-                cursor: pointer;
-                border: none;
-                background: none;
-                font-size: 13.5px;
-                font-weight: 600;
-                color: var(--text-mute);
-                border-radius: var(--radius-sm);
-                transition: all 0.2s;
-            }
-
-            .tab-btn.active {
-                background: var(--primary);
-                color: white;
-            }
-
-            .control-bar { display: flex; align-items: center; gap: 12px; justify-content: space-between; width: 100%; }
-            @media(min-width: 640px) { .control-bar { width: auto; } }
-            .time-label { font-size: 11px; color: var(--text-mute); font-weight: 500; }
-            
-            select {
-                -webkit-appearance: none; appearance: none;
-                font-size: 12px; font-weight: 700; color: var(--primary);
-                border: 1px solid var(--border); border-radius: var(--radius-sm);
-                padding: 6px 28px 6px 12px; background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%232563eb' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E") no-repeat right 10px center;
-                cursor: pointer; transition: all 0.2s;
-            }
-            select:focus { outline: none; border-color: var(--primary); }
-
-            .tab-content { display: none; }
-            .tab-content.active { display: block; }
-
-            .focus-stack {
-                display: flex;
-                flex-direction: column;
-                gap: 20px;
-                margin-bottom: 24px;
-            }
-
-            .focus-card {
-                background: var(--bg-card);
-                border: 1px solid var(--border);
-                border-radius: var(--radius-md);
-                box-shadow: var(--shadow-sm);
-                padding: 20px;
-            }
-
-            .focus-card.ai-theme { border-top: 4px solid var(--primary); }
-            .focus-card.browser-theme { border-top: 4px solid var(--accent); }
-
-            .card-title {
-                font-family: 'Noto Serif SC', serif;
-                font-size: 16px; font-weight: 900;
-                margin: 0 0 16px 0;
-                display: flex; align-items: center; gap: 8px;
-            }
-            .ai-theme .card-title { color: var(--primary); }
-            .browser-theme .card-title { color: var(--accent); }
-
-            .focus-item {
-                padding: 12px 0;
-                border-bottom: 1px dashed var(--border);
-            }
-            .focus-item:last-child { border-bottom: none; }
-
-            .focus-item-title {
-                font-size: 14px; font-weight: 700; color: var(--text-main);
-                text-decoration: none; display: block; margin-bottom: 6px;
-                transition: color 0.2s;
-            }
-            .focus-item-title:hover { color: var(--primary); }
-            .focus-item-desc { font-size: 12.5px; color: var(--text-sub); text-align: justify; margin: 0 0 8px 0; }
-
-            .card-empty {
-                text-align: center; padding: 24px 0; color: var(--text-mute); font-size: 13px; font-weight: 500;
-            }
-
-            .meta-row { display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-mute); }
-            .tag-box { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
-            .badge { font-size: 9.5px; padding: 2px 6px; font-weight: 600; border-radius: 4px; }
-            .badge-primary { background: var(--primary-light); color: var(--primary); }
-            .badge-accent { background: var(--accent-light); color: var(--accent); }
-            .badge-gray { background: #f1f5f9; color: #475569; }
-            .link-text { color: var(--primary); text-decoration: none; font-weight: 600; }
-
-            .section-group-title {
-                font-family: 'Noto Serif SC', serif;
-                font-size: 15px; font-weight: 900; color: var(--text-main);
-                margin: 24px 0 12px 0; padding-left: 8px; border-left: 4px solid var(--primary);
-            }
-            
-            .news-list {
-                background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md);
-                box-shadow: var(--shadow-sm); overflow: hidden; margin-bottom: 16px;
-            }
-
-            .news-row {
-                padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer;
-                transition: background 0.2s;
-            }
-            .news-row:last-child { border-bottom: none; }
-            .news-row:hover { background: var(--bg-main); }
-
-            .news-row-header { display: flex; justify-content: space-between; align-items: center; }
-            .news-row-title { font-size: 13.5px; font-weight: 600; color: var(--text-sub); padding-right: 20px; }
-            
-            .toggle-icon { font-size: 14px; color: var(--text-mute); transition: transform 0.2s; }
-            .news-row.open .toggle-icon { transform: rotate(45deg); color: var(--primary); }
-
-            .news-row-body { display: none; padding-top: 10px; font-size: 12.5px; color: var(--text-sub); border-top: 1px dashed var(--border); margin-top: 8px; text-align: justify; }
-            .news-row.open .news-row-body { display: block; }
-
-            /* 历史检索网格布局 */
-            .filter-grid {
-                background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md);
-                padding: 16px; margin-bottom: 20px; display: grid; grid-template-columns: 1fr; gap: 10px;
-            }
-            @media(min-width: 640px) {
-                .filter-grid { grid-template-columns: repeat(3, 1fr); }
-            }
-            .filter-grid select { width: 100%; box-sizing: border-box; padding: 8px 12px; }
-            .btn-action {
-                grid-column: 1 / -1; background: var(--primary); color: white; border: none; padding: 12px;
-                border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; font-size: 13px; transition: opacity 0.2s;
-            }
-            .btn-action:hover { opacity: 0.9; }
-        </style>
-    </head>
-    <body>
-    <div class="container">
-        <header><h1>全球 AI 核心动态内参</h1></header>
+    if not os.path.exists("template.html"):
+        print("❌ 错误：未在当前目录下找到 template.html 模板文件！")
+        sys.exit(1)
         
-        <div class="navbar">
-            <div class="tabs-nav">
-                <button class="tab-btn active" id="btn-daily" onclick="switchTab('daily')">每日综述</button>
-                <button class="tab-btn" id="btn-filter" onclick="switchTab('filter')">历史检索</button>
-            </div>
-            <div id="main-control-bar" class="control-bar" style="display: flex;">
-                <div id="current-time-label" class="time-label">监测周期：加载中...</div>
-                <select id="dateSelect" onchange="changeDate(this.value)">
-                    {% for d in dates %}<option value="{{d}}">{% if '至' in d %}{{ d.split('至')[1].strip() }}{% else %}{{ d }}{% endif %}</option>{% endfor %}
-                </select>
-            </div>
-        </div>
+    with open("template.html", "r", encoding="utf-8") as tf:
+        template_str = tf.read()
 
-        <div id="panel-daily" class="tab-content active">
-            {% for d in dates %}
-            <div id="date-group-{{d}}" class="date-container" style="display: {{ 'block' if loop.first else 'none' }}">
-                
-                <div class="focus-stack">
-                    <div class="focus-card ai-theme">
-                        <h3 class="card-title">
-                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2H5zm0 1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M3 5.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5zM3 8a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9A.5.5 0 0 1 3 8zm0 2.5a.5.5 0 0 1 .5-.5h9a.5.5 0 0 1 0 1h-9a.5.5 0 0 1-.5-.5z"/></svg>
-                            今日 AI 重点
-                        </h3>
-                        {% if headlines_ai_map[d] %}
-                            {% for hl in headlines_ai_map[d] %}
-                            <div class="focus-item">
-                                <div class="tag-box">
-                                    {% for tag in hl['话题_list'] %}<span class="badge badge-primary">{{tag}}</span>{% endfor %}
-                                    <span class="badge badge-gray">{{hl['公司']}}</span>
-                                </div>
-                                <a href="{{hl['链接']}}" target="_blank" class="focus-item-title">{{hl['标题']}}</a>
-                                <p class="focus-item-desc">{{hl['核心内容']}}</p>
-                                <div class="meta-row">
-                                    <span>来源: {{hl['来源']}}</span>
-                                    <a href="{{hl['链接']}}" class="link-text" target="_blank">阅读原文 →</a>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            <div class="card-empty">无</div>
-                        {% endif %}
-                    </div>
-
-                    <div class="focus-card browser-theme">
-                        <h3 class="card-title">
-                            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zM1.066 8a7.24 7.24 0 0 1 .645-2.955L4.835 8H1.066zm1.096-3.864A6.953 6.953 0 0 1 4.33 2.152l2.12 3.984H2.162zm7.508-2.012a6.954 6.954 0 0 1 2.167 1.984H7.548l2.122-3.984zM14.934 8h-3.77l3.123-2.955a7.24 7.24 0 0 1 .647 2.955zm-1.096 3.864-3.124-2.984h4.158a6.955 6.955 0 0 1-1.034 2.984zm-7.508 2.012-2.12-3.984h4.242l-2.122 3.984zm-4.17-.972a6.955 6.955 0 0 1-1.034-2.984h4.158l-3.124 2.984z"/></svg>
-                            今日浏览器/输入法重点
-                        </h3>
-                        {% if headlines_browser_map[d] %}
-                            {% for hl in headlines_browser_map[d] %}
-                            <div class="focus-item">
-                                <div class="tag-box">
-                                    {% for tag in hl['话题_list'] %}<span class="badge badge-accent">{{tag}}</span>{% endfor %}
-                                    <span class="badge badge-gray">{{hl['公司']}}</span>
-                                </div>
-                                <a href="{{hl['链接']}}" target="_blank" class="focus-item-title">{{hl['标题']}}</a>
-                                <p class="focus-item-desc">{{hl['核心内容']}}</p>
-                                <div class="meta-row">
-                                    <span>来源: {{hl['来源']}}</span>
-                                    <a href="{{hl['链接']}}" class="link-text" target="_blank">阅读原文 →</a>
-                                </div>
-                            </div>
-                            {% endfor %}
-                        {% else %}
-                            <div class="card-empty">无</div>
-                        {% endif %}
-                    </div>
-                </div>
-
-                {% for co, items in news_data_map[d].items() %}
-                <div class="company-section">
-                    <div class="section-group-title">{{co}}</div>
-                    <div class="news-list">
-                        {% for it in items %}
-                        <div class="news-row" onclick="this.classList.toggle('open')">
-                            <div class="news-row-header">
-                                <div>
-                                    <div class="tag-box">
-                                        {% for tag in it['话题_list'] %}<span class="badge badge-gray">{{tag}}</span>{% endfor %}
-                                        {% if co == SECONDARY_TITLE or co == '行业新闻' %}<span class="badge badge-gray" style="background:#fef3c7; color:#d97706">{{it['公司']}}</span>{% endif %}
-                                        <span class="badge {% if it['分类'] in ['浏览器','输入法'] %}badge-accent{% else %}badge-primary{% endif %}">{{it['分类'] if it['分类'] else 'AI'}}</span>
-                                    </div>
-                                    <div class="news-row-title">{{it['标题']}}</div>
-                                </div>
-                                <div class="toggle-icon">＋</div>
-                            </div>
-                            <div class="news-row-body">
-                                {{it['核心内容']}}
-                                <div class="meta-row" style="margin-top: 10px;">
-                                    <span>来源: {{it['来源']}}</span>
-                                    <a href="{{it['链接']}}" class="link-text" target="_blank" onclick="event.stopPropagation();">阅读原文 →</a>
-                                </div>
-                            </div>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            {% endfor %}
-        </div>
-
-        <div id="panel-filter" class="tab-content">
-            <div class="filter-grid">
-                <select id="f-year" onchange="updateMonths()"><option value="all">所有年份</option></select>
-                <select id="f-month" onchange="updateDays()"><option value="all">所有月份</option></select>
-                <select id="f-day"><option value="all">具体日期</option></select>
-                <select id="f-co"><option value="all">所有公司</option>{% for c in all_companies_clean %}<option value="{{c}}">{{c}}</option>{% endfor %}</select>
-                <select id="f-topic"><option value="all">所有话题</option>{% for t in all_topics %}<option value="{{t}}">{{t}}</option>{% endfor %}</select>
-                
-                <select id="f-cate">
-                    <option value="all">所有分类(AI 与 浏览器/输入法)</option>
-                    <option value="AI">AI动态</option>
-                    <option value="BrowserInput">浏览器/输入法</option>
-                </select>
-                
-                <button onclick="doSearch()" class="btn-action">立即检索内容</button>
-            </div>
-            <div id="results"></div>
-        </div>
-    </div>
-
-    <script>
-        const rawData = {{ final_json_str | safe }};
-        
-        function initFilter() {
-            const years = [...new Set(rawData.map(it => it.year))].sort((a,b) => b-a);
-            const ySelect = document.getElementById('f-year');
-            ySelect.innerHTML = '<option value="all">所有年份</option>';
-            years.forEach(y => ySelect.add(new Option(y + '年', y)));
-            updateMonths();
-        }
-
-        function updateMonths() {
-            const year = document.getElementById('f-year').value;
-            const mSelect = document.getElementById('f-month');
-            mSelect.innerHTML = '<option value="all">所有月份</option>';
-            let filtered = rawData;
-            if(year !== 'all') filtered = rawData.filter(it => it.year == year);
-            const months = [...new Set(filtered.map(it => it.month))].sort((a,b) => a-b);
-            months.forEach(m => mSelect.add(new Option(m + '月', m)));
-            updateDays();
-        }
-
-        function updateDays() {
-            const year = document.getElementById('f-year').value;
-            const month = document.getElementById('f-month').value;
-            const dSelect = document.getElementById('f-day');
-            dSelect.innerHTML = '<option value="all">具体日期</option>';
-            let filtered = rawData;
-            if(year !== 'all') filtered = filtered.filter(it => it.year == year);
-            if(month !== 'all') filtered = filtered.filter(it => it.month == month);
-            const dates = [...new Set(filtered.map(it => it.日期))];
-            dates.forEach(d => {
-                const display = d.includes('至') ? d.split('至')[1].trim() : d;
-                dSelect.add(new Option(display, d));
-            });
-        }
-
-        function switchTab(id) {
-            document.querySelectorAll('.tab-content').forEach(p => p.classList.remove('active'));
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.getElementById('panel-' + id).classList.add('active');
-            document.getElementById('btn-' + id).classList.add('active');
-            const ctrlBar = document.getElementById('main-control-bar');
-            if (ctrlBar) ctrlBar.style.display = (id === 'filter') ? 'none' : 'flex';
-            if(id === 'filter') { initFilter(); doSearch(); }
-        }
-
-        function changeDate(d) {
-            document.querySelectorAll('.date-container').forEach(g => g.style.display = 'none');
-            const target = document.getElementById('date-group-' + d);
-            if(target) target.style.display = 'block';
-            updateTimeLabel(d);
-        }
-
-        function updateTimeLabel(d) {
-            let startLabel = ""; let endLabel = "";
-            if (d.includes("至")) {
-                const parts = d.split("至");
-                const startObj = new Date(parts[0].trim()); const endObj = new Date(parts[1].trim());
-                if (!isNaN(startObj)) {
-                    startObj.setDate(startObj.getDate() - 1);
-                    startLabel = startObj.getFullYear() + '/' + (startObj.getMonth() + 1) + '/' + startObj.getDate() + ' 17:00';
-                    endLabel = endObj.getFullYear() + '/' + (endObj.getMonth() + 1) + '/' + endObj.getDate() + ' 17:00';
-                }
-            } else {
-                const current = new Date(d);
-                if (!isNaN(current)) {
-                    const prev = new Date(current); prev.setDate(current.getDate() - 1);
-                    startLabel = prev.getFullYear() + '/' + (prev.getMonth() + 1) + '/' + prev.getDate() + ' 17:00';
-                    endLabel = current.getFullYear() + '/' + (current.getMonth() + 1) + '/' + current.getDate() + ' 17:00';
-                }
-            }
-            const labelEl = document.getElementById('current-time-label');
-            if (labelEl) labelEl.innerText = startLabel ? "监测周期：" + startLabel + " 至 " + endLabel : "监测周期：" + d;
-        }
-
-        window.onload = () => { 
-            const select = document.getElementById('dateSelect'); 
-            if(select) changeDate(select.value);
-        };
-
-        function doSearch() {
-            const year = document.getElementById('f-year').value;
-            const month = document.getElementById('f-month').value;
-            const day = document.getElementById('f-day').value;
-            const company = document.getElementById('f-co').value;
-            const topic = document.getElementById('f-topic').value;
-            const cate = document.getElementById('f-cate').value; // 🔍 检索新分类标签
-            
-            const filtered = rawData.filter(it => {
-                let dateMatch = true;
-                if (day !== 'all') { dateMatch = it.日期 === day; }
-                else if (month !== 'all') { dateMatch = (it.year == year && it.month == month); }
-                else if (year !== 'all') { dateMatch = it.year == year; }
-                
-                const coMatch = (company === 'all' || it.公司.includes(company));
-                const topicMatch = (topic === 'all' || it.话题_list.includes(topic));
-                
-                // 🔍 分类级联检索过滤核心逻辑
-                let cateMatch = true;
-                const itemCate = (it.分类 || '').trim();
-                if (cate === 'AI') {
-                    cateMatch = (itemCate === 'AI' || itemCate === '');
-                } else if (cate === 'BrowserInput') {
-                    cateMatch = (itemCate === '浏览器' || itemCate === '输入法');
-                }
-                
-                return dateMatch && coMatch && topicMatch && cateMatch;
-            });
-            
-            const resDiv = document.getElementById('results');
-            resDiv.innerHTML = filtered.length ? '' : '<p style="text-align:center; padding:32px; font-size:12px; color:#94a3b8;">无匹配动态</p>';
-            
-            if(filtered.length) {
-                const listDiv = document.createElement('div');
-                listDiv.className = 'news-list';
-                filtered.forEach(it => {
-                    const item = document.createElement('div');
-                    item.className = 'news-row';
-                    item.onclick = () => item.classList.toggle('open');
-                    const showD = it.日期.includes('至') ? it.日期.split('至')[1].trim() : it.日期.trim();
-                    let tagsHtml = it.话题_list.map(tag => `<span class="badge badge-gray">${tag}</span>`).join('');
-                    
-                    const displayCate = (it.分类 === '浏览器' || it.分类 === '输入法') ? '浏览器/输入法' : 'AI';
-                    const cateColor = displayCate === 'AI' ? 'background:#eff6ff; color:#2563eb' : 'background:#f0fdfa; color:#0d9488';
-                    
-                    item.innerHTML = `<div class="news-row-header"><div><div class="tag-box">${tagsHtml}<span class="badge badge-gray" style="background:#e2e8f0">${showD}</span><span class="badge badge-gray" style="background:#f1f5f9; color:#475569">${it.公司}</span><span class="badge" style="${cateColor}">${displayCate}</span></div><div class="news-row-title">${it.标题}</div></div><div class="toggle-icon">＋</div></div><div class="news-row-body">${it.核心内容}<div class="meta-row" style="margin-top:10px;"><span>来源: ${it.来源}</span><a href="${it.链接}" class="link-text" target="_blank" onclick="event.stopPropagation();">阅读原文 →</a></div></div>`;
-                    listDiv.appendChild(item);
-                });
-                resDiv.appendChild(listDiv);
-            }
-        }
-    </script>
-    </body>
-    </html>
-    """
-
-    # 4.1 输出生成
     html = Template(template_str).render(
         dates=all_dates, 
         news_data_map=news_data_map, 
@@ -637,7 +162,7 @@ def main():
     )
     
     with open("index.html", "w", encoding="utf-8") as f: f.write(html)
-    print("✨ index.html 基于新‘分类’列数据及检索模块重新编译成功！")
+    print("✨ index.html 基于外部 template.html 模板重新编译成功！")
 
 if __name__ == "__main__":
     main()
